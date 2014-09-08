@@ -1,11 +1,11 @@
 from distutils.core import setup, Extension
 
-setup(name = "SWMixer",
-      author = "Nathan Whitehead",
-      author_email = "nwhitehe@gmail.com",
-      version = "0.1.4",
-      url = "http://code.google.com/p/pygalaxy/",
-      py_modules = ['swmixer'],
+setup(name = "PyAudioMixer",
+      author = "Nick Vahalik",
+      author_email = "nick@nickvahalik.com",
+      version = "0.3.0",
+      url = "https://github.com/nvahalik/PyAudioMixer",
+      py_modules = ['PyAudioMixer'],
       description = "An advanced software mixer for sound playback and recording",
       long_description = '''
 This module implements a realtime sound mixer suitable for use in

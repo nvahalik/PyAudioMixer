@@ -359,8 +359,8 @@ class Sound:
         if self.data is None:
             assert False
         # Resample if needed
-        if fr != self.samplerate:
-            scale = self.samplerate * 1.0 / fr
+        if fr != self.mixer.samplerate:
+            scale = self.mixer.samplerate * 1.0 / fr
             if nc == 1:
                 self.data = resample(self.data, scale)
             if nc == 2:
@@ -414,7 +414,7 @@ class Sound:
                     env = [[0, volume]]
                 else:
                     env = [[offset, 0.0], [offset + fadein, volume]]
-        src = _SoundSourceData(self.data, loops)
+        src = _SoundSourceData(self.mixer, self.data, loops)
         src.pos = offset
         sndevent = Channel(self.mixer, src, env)
         return sndevent
