@@ -170,7 +170,6 @@ class Channel:
     def _get_samples(self, sz):
         if not self.active: return None
         v = calc_vol(self.src.pos, self.env)
-        print v
         z = self.src.get_samples(sz)
         if self.src.done: self.done = True
         return z * v
@@ -231,6 +230,70 @@ def stereo_to_mono(left, right):
     """Return mono array from left and right sound stream arrays"""
     return (0.5 * left + 0.5 * right).astype(numpy.int16)
 
+
+def _create_stream(mixer, filename, checks):
+    if filename[-3:] in ['wav','WAV']:
+        wf = wave.open(filename, 'rb')
+        if checks:
+            assert(wf.getsampwidth() == 2)
+            assert(wf.getnchannels() == mixer.channels)
+            assert(wf.getframerate() == mixer.samplerate)
+        # create stream object
+        stream = _Stream()
+        def str_read():
+            return wf.readframes(4096)
+        # give the stream object a read() method
+        stream.read = str_read
+        def str_seek_time(t):
+            if t == 0: wf.rewind()
+            assert(False) # unsupported for WAV streams
+        stream.seek_time = str_seek_time
+        return stream
+    # Here's how to do it for MP3
+    if filename[-3:] in ['mp3','MP3']:
+        mf = mad.MadFile(filename)
+        if checks:
+            assert(mixer.channels == 2) # MAD always returns stereo
+            assert(mf.samplerate() == mixer.samplerate)
+        stream = mf
+        return stream
+    assert(False) # filename must have wav or mp3 extension
+
+def calc_vol(t, env):
+    """Calculate volume at time t given envelope env
+
+    envelope is a list of [time, volume] points
+    time is measured in samples
+    envelope should be sorted by time
+
+    """
+    #Find location of last envelope point before t
+    if len(env) == 0: return 1.0
+    if len(env) == 1:
+        return env[0][1]
+    n = 0
+    while n < len(env) and env[n][0] < t:
+        n += 1
+    if n == 0:
+        # in this case first point is already too far
+        # envelope hasn't started, just use first volume
+        return env[0][1]
+    if n == len(env):
+        # in this case, all points are before, envelope is over
+        # use last volume
+        return env[-1][1]
+        
+    # now n holds point that is later than t
+    # n - 1 is point before t
+    f = float(t - env[n - 1][0]) / (env[n][0] - env[n - 1][0])
+    # f is 0.0--1.0, is how far along line t has moved from
+    #  point n - 1 to point n
+    # volume is linear interpolation between points
+    return env[n - 1][1] * (1.0 - f) + env[n][1] * f
+
+def sine(frequency, length, rate, start = 0):
+    factor = frequency * (PI * 2) / rate
+    return numpy.sin(numpy.arange(start, length+start) * factor, dtype=numpy.float)
 
 class Sound:
     """Represents a playable sound"""
@@ -376,34 +439,6 @@ class Sound:
 class _Stream:
     pass
 
-def _create_stream(mixer, filename, checks):
-    if filename[-3:] in ['wav','WAV']:
-        wf = wave.open(filename, 'rb')
-        if checks:
-            assert(wf.getsampwidth() == 2)
-            assert(wf.getnchannels() == mixer.channels)
-            assert(wf.getframerate() == mixer.samplerate)
-        # create stream object
-        stream = _Stream()
-        def str_read():
-            return wf.readframes(4096)
-        # give the stream object a read() method
-        stream.read = str_read
-        def str_seek_time(t):
-            if t == 0: wf.rewind()
-            assert(False) # unsupported for WAV streams
-        stream.seek_time = str_seek_time
-        return stream
-    # Here's how to do it for MP3
-    if filename[-3:] in ['mp3','MP3']:
-        mf = mad.MadFile(filename)
-        if checks:
-            assert(mixer.channels == 2) # MAD always returns stereo
-            assert(mf.samplerate() == mixer.samplerate)
-        stream = mf
-        return stream
-    assert(False) # filename must have wav or mp3 extension
-
 class StreamingSound:
     """Represents a playable sound stream"""
 
@@ -463,38 +498,6 @@ class StreamingSound:
         src.pos = offset
         sndevent = Channel(self.mixer, src, env)
         return sndevent
-
-def calc_vol(t, env):
-    """Calculate volume at time t given envelope env
-
-    envelope is a list of [time, volume] points
-    time is measured in samples
-    envelope should be sorted by time
-
-    """
-    #Find location of last envelope point before t
-    if len(env) == 0: return 1.0
-    if len(env) == 1:
-        return env[0][1]
-    n = 0
-    while n < len(env) and env[n][0] < t:
-        n += 1
-    if n == 0:
-        # in this case first point is already too far
-        # envelope hasn't started, just use first volume
-        return env[0][1]
-    if n == len(env):
-        # in this case, all points are before, envelope is over
-        # use last volume
-        return env[-1][1]
-        
-    # now n holds point that is later than t
-    # n - 1 is point before t
-    f = float(t - env[n - 1][0]) / (env[n][0] - env[n - 1][0])
-    # f is 0.0--1.0, is how far along line t has moved from
-    #  point n - 1 to point n
-    # volume is linear interpolation between points
-    return env[n - 1][1] * (1.0 - f) + env[n][1] * f
 
 class Mixer:
     def microphone_on(self):
@@ -603,7 +606,7 @@ class Mixer:
         microphone - whether to enable microphone recording
         
         """
-        assert (10000 < samplerate <= 48000)
+        assert (8000 <= samplerate <= 48000)
         self.samplerate = samplerate
         self.chunksize = chunksize        
         assert (stereo in [True, False])
@@ -667,10 +670,6 @@ class Mixer:
         self.lock.acquire()
         self.chunksize = size
         self.lock.release()
-
-def sine(frequency, length, rate, start = 0):
-    factor = frequency * (PI * 2) / rate
-    return numpy.sin(numpy.arange(start, length+start) * factor, dtype=numpy.float)
 
 class _DynamicGenerator:
     def __init__(self, mixer, freq, duration = -1):
@@ -773,7 +772,6 @@ class FrequencyGenerator(DynamicGenerator):
 
 class DTMFGenerator(FrequencyGenerator):
     generator_class = _DTMFGenerator        
-
 class _MicInput:
     def __init__(self, mixer, device_id, duration = -1):
         self.mixer = mixer
@@ -786,11 +784,11 @@ class _MicInput:
             channels = mixer.channels,
             rate = mixer.samplerate,
             input_device_index = device_id,
-        input = True)
+            input = True)
 
     def set_duration(self, duration):
         self.duration = duration
-        self.samples_remaining = duration * self.mixer.samplerate
+        self.samples_remaining = duration * self.mixer.samplerate * self.mixer.channels
 
     def get_samples(self, number_of_samples_requested):
         number_of_samples = number_of_samples_requested
@@ -798,7 +796,7 @@ class _MicInput:
         if not self.samples_remaining < 0 and number_of_samples_requested > self.samples_remaining:
             number_of_samples = self.samples_remaining
 
-        samples = self.stream.read(int(number_of_samples))
+        samples = self.stream.read(int(number_of_samples) / self.mixer.channels)
         samples = numpy.fromstring(samples, dtype=numpy.int16)
         self.pos += len(samples)
 
@@ -818,6 +816,9 @@ class MicInput(DynamicGenerator):
         DynamicGenerator.__init__(self, mixer, checks)
         #self.device_id = pyaudio_input_device_id
         self.src = _MicInput(mixer, pyaudio_input_device_id)
+
+    def live(self, volume=.25):
+        self.play(-1, volume)
 
     def play(self, duration=.5, volume=.25, fadein=0, envelope=None):
         """Play the sound stream
